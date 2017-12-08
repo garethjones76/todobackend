@@ -1,0 +1,3 @@
+FROM nginx
+MAINTAINER Gareth Jones <gareth_jones76@hotmail.com>
+COPY todobackend.conf /etc/nginx/conf.d/todobackend.conf
