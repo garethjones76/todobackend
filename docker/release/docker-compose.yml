@@ -33,7 +33,7 @@ nginx:
   dockerfile: Dockerfile.nginx
   links:
     - app
-   ports:
+  ports:
     - "8000:8000"
   volumes_from:
     - webroot
