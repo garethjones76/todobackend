@@ -42,7 +42,7 @@ DOCKER_REGISTRY_AUTH ?=
 test:
 	${INFO} "Pulling latest images..."
 	@ echo ${pwd}
-	@ echo $PWD
+	@ echo ${PWD}
 	@ echo ${whoami}
 	@ echo $(DEV_PROJECT) 
 	@ echo $(DEV_COMPOSE_FILE) 
