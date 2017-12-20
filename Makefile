@@ -41,8 +41,8 @@ DOCKER_REGISTRY_AUTH ?=
 
 test:
 	${INFO} "Pulling latest images..."
-	@ echo $(pwd)
-	@ echo $(whoami)
+	@ echo ${pwd}
+	@ echo ${whoami}
 	@ echo $(DEV_PROJECT) 
 	@ echo $(DEV_COMPOSE_FILE) 
 	@ docker-compose -p $(DEV_PROJECT) -f $(DEV_COMPOSE_FILE) pull
