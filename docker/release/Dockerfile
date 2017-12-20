@@ -1,4 +1,4 @@
-FROM gjones/todobackend-base:latest
+FROM garethjones76/todobackend-base:latest
 MAINTAINER Gareth Jones <gareth_jones76@hotmail.com>
 
 COPY target /wheelhouse

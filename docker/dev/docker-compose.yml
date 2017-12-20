@@ -21,7 +21,7 @@ builder:
   command: ["pip", "wheel", "--no-index", "-f /build", "."]
 
 agent:
-  image: gjones/ansible
+  image: garethjones76/ansible
   links:
     - db
   environment:

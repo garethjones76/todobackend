@@ -1,4 +1,4 @@
-FROM gjones/todobackend-base:latest
+FROM garethjones76/todobackend-base:latest
 MAINTAINER Justin Menga <justin.menga@gmail.com>
 
 # Install dev/build dependencies
