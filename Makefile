@@ -41,7 +41,7 @@ DOCKER_REGISTRY_AUTH ?=
 
 test:
 	${INFO} "Pulling latest images..."
-	@ docker-compose version
+	@ sudo docker-compose version
 	@ echo ${pwd}
 	@ echo ${PWD}
 	@ echo ${whoami}
