@@ -41,16 +41,11 @@ DOCKER_REGISTRY_AUTH ?=
 
 test:
 	${INFO} "Pulling latest images..."
-	@ echo `which docker-compose`
-	@ sudo docker-compose version
-	@ echo ${pwd}
-	@ echo ${PWD}
-	@ echo ${whoami}
-	@ echo $(DEV_PROJECT) 
-	@ echo $(DEV_COMPOSE_FILE) 
 	@ docker-compose -p $(DEV_PROJECT) -f $(DEV_COMPOSE_FILE) pull
 	${INFO} "Building images..."
+	${INFO} "Pull & build test"
 	@ docker-compose -p $(DEV_PROJECT) -f $(DEV_COMPOSE_FILE) build --pull test
+	${INFO} "Build cache"
 	@ docker-compose -p $(DEV_PROJECT) -f $(DEV_COMPOSE_FILE) build cache
 	${INFO} "Ensuring database is ready..."
 	@ docker-compose -p $(DEV_PROJECT) -f $(DEV_COMPOSE_FILE) run --rm agent
