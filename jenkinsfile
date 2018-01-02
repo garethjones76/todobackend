@@ -1,0 +1,40 @@
+node {
+    checkout scm
+    
+    try {
+        stage('Run clean') {
+            sh 'sudo make clean'
+        }
+        
+        stage('Run integration tests') {
+            sh 'whoami'
+            sh 'sudo make test'
+        }
+        stage('Build application artefacts') {
+            sh 'sudo make build'
+        }
+        stage('Create release environment and run acceptance tests') {
+            sh 'sudo make release'
+        }
+        stage('log and publish release image') {
+            sh 'sudo make tag latest \$(git rev-parse --short HEAD) \$(git tag points-at HEAD)'
+            sh 'sudo make buildtag master \$(git tag --points-at HEAD)'
+            withEnv(["DOCKER_USER=${DOCKER_USER}",
+                     "DOCKER_PASSWORD=${DOCKER_PASSWORD}",
+                     "DOCKER_EMAIL=${DOCKER_EMAIL}"]) {
+                sh "sudo make login"
+            }
+        }
+        sh "sudo make publish"
+    
+    }
+    finally {
+        stage('collect test reports') {
+            step([$class: 'JUnitResultArchiver', testResults: '**/reports/*.xml'])
+        }
+        stage('Clean up') {
+            sh 'sudo make clean'
+            sh 'sudo make logout'
+        }
+    }
+}
