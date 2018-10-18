@@ -529,7 +529,172 @@ Subsequent runs are faster as they can now access the cache:
 
 
 ==============================================================
-Section 9 - Testing using different settings : 
+Section 9 - Using Docker Compose : 
+==============================================================
+The tests have so far been done using the django default settings. To run using the specific settings added to the test.py file in the previous steps - add an environment variable to the run command to define the django settings module environment variable:
+	docker run --rm -e DJANGO_SETTINGS_MODULE=todobackend.settings.test --volumes-from cache todobackend-dev
+This point the runtime at the file:
+	../todobackend/src/todobackend/settings/test.py
+However this contains the lines:
+	DATABASES = {
+	
+	'default': {
+		'ENGINE': 'django.db.backends.mysql',
+		'NAME': os.environ.get('MYSQL_DATABASE', 'todobackend'),
+		'USER': os.environ.get('MYSQL_USER', 'todo'),
+		'PASSWORD': os.environ.get('MYSQL_PASSWORD', 'password'),
+		'HOST': os.environ.get('MYSQL_HOST', 'localhost'),
+but 'HOST': os.environ.get('MYSQL_HOST', 'localhost'), will fail because mysql is not running in the docker container but on the docker host. 
+Running mysql in the container would break the golden rule "one process per container". We could point to the mysql server on the host but this breaks portability. The answer is to run a separate container for mysql and to link the two. The best way to define multiple containers is using Docker Compose which is a tool for defining and running multi-container Docker applications.
+
+Next steps are to create a Docker Compose definition and run the tests using the docker compose config with configuration to allow for mysql to successfully start before testing.
+
+First create the docker-compose.yml file:
+	vi ~/cd-docker-ansible/todobackend/docker/dev/docker-compose.yml
+	
+This file contains "service" definitions - each of which corresponds to a docker container. The service defintion defines items such as the image to use (or alternatively what to build), linked containers, volumes, volume containers, environment variables etc
+
+The compose file for this app can be described as follows :
+
+	test:
+  		build: ../../
+  		dockerfile: docker/dev/Dockerfile
+  		volumes_from:
+    		  - cache
+  		links:
+  		  - db
+  		environment:
+    		  DJANGO_SETTINGS_MODULE: todobackend.settings.test
+    	 	  MYSQL_HOST: db
+    		  MYSQL_USER: root
+    		  MYSQL_PASSWORD: password
+    		  TEST_OUTPUT_DIR: /reports
+This is the application service named "test". 
+Because the Dev env is built each iteration, this uses a build: rather than an image: option. The build: option defines the context for creating the app ie the top-level root folder for the app repository - in this case the root folder is "todobackend" which is reached from the docker-compose file via ../../ 
+Next is the dockerfile to be used in the build - specified relative to the build: context 
+Next volumes are defined using the volumes-from: option - this defines a volume "cache". This will look for a container named cache or alternaively a service in the docker-compose file name cache to create.
+Next the links: option is used to define other services to which this service requires a link - in this case "db". This means an entry "db" will be automatically added to /etc/hosts in the "test" container pointing to the "db" container.
+Next the environment settings are defined - note they include the "MYSQL_HOST: db" setting plus its user and password. They also include the "TEST_OUTPUT_DIR: /reports" variable which is specified as a volume in the development image.
+
+
+Next re define or cache: service
+	cache:
+  		build: ../../
+  		dockerfile: docker/dev/Dockerfile
+  		volumes:
+    		  - /tmp/cache:/cache
+    		  - /build
+  		entrypoint: "true"
+
+These service settings mirror exactly what we previously did from the command line. This also gets built using the Dev Dockerfile. This maps the host dir "/tmp/cache" to the container dir "/build" and sets "entrypoint: true" so that the container exits without doing anything.
+
+We also add a db: service to define the container running mysql for testing:
+	db:
+  		image: mysql:5.6
+  		hostname: db
+  		expose:
+    		  - "3306"
+  		environment:
+    		  MYSQL_ROOT_PASSWORD: password
+
+This service exposes port 3306 - the default mysql port
+It also defines root password - which matches the root password defined in the "test:" service
+
+We can now test this integrated environment we have defined. This next command will use the docker-compose.yml definition to bring up an environment called test:
+
+	cd ~/cd-docker-ansible/todobackend/docker/dev
+	docker-compose up test
+
+
+To see the running services we can use :
+	docker-compose up test
+		   Name                  Command               State     Ports  
+		----------------------------------------------------------------
+		dev_cache_1   true                             Exit 0           
+		dev_db_1      docker-entrypoint.sh mysqld      Up       3306/tcp
+		dev_test_1    test.sh python manage.py t ...   Exit 0           
+This shows the db is still running
+
+To view the logs on the running db service we can use:
+	docker-compose logs db
+To kill the services and force clear the caches use:
+	docker-compose kill
+	docker-compose rm -f
+	
+Although there is a link between services test: and db:, docker-compose will not wait for mysql on the db: container to initialise. So there is a race condition - tests could run before the mysql db initialises and might therefore fail. 
+To resolve this race condition we need to have test: wait for db: to complete it startup. To do this we create an agent service using ansible. 
+In a folder named docker-ansible - create a docker image to run ansible:
+	cd ~/cd-docker-ansible/
+	mkdir docker-ansible
+	vi docker-ansible/Dockerfile
+
+This Dockerfile creates an ubuntu container, installs ansible, creates an ansible volume then runs an ansible workbook with a default value of site.yml:
+	FROM ubuntu:trusty
+	MAINTAINER GarethJones <gareth_jones76@hotmail.com>
+
+	ENV TERM=xterm-256color
+
+	RUN sed -i "s/http:\/\/archive./http:\/\/nz.archive./g" /etc/apt/sources.list
+
+	RUN apt-get update -qy && \
+	    apt-get install -qy software-properties-common && \
+	    apt-add-repository -y ppa:ansible/ansible && \
+	    apt-get update -qy && \
+	    apt-get install -qy ansible
+
+	COPY ansible /ansible
+
+	VOLUME /ansible
+	WORKDIR /ansible
+	
+	ENTRYPOINT ["ansible-playbook"]
+	CMD ["site.yml"]
+
+Next in the ~/cd-docker-ansible/todobackend folder create a folder named ansible and add a yml file name probe.yml:
+	cat probe.yml 
+	---
+	- name: Probe Host
+	  hosts: localhost
+	  connection: local
+	  gather_facts: no
+	  tasks:
+	  - name: Set facts
+	    set_fact:
+	      probe_host: "{{ lookup('env','PROBE_HOST') }}"
+	      probe_port: "{{ lookup('env','PROBE_PORT') }}"
+	      probe_delay: "{{ lookup('env','PROBE_DELAY') | default(0, true) }}"
+	      probe_timeout: "{{ lookup('env','PROBE_TIMEOUT') | default (180, true) }}"
+	  - name: Message
+	    debug: 
+	      msg: >
+	        Probing {{ probe_host }}:{{ probe_port }} with delay={{ probe_delay }}s
+	        and timeout={{ probe_timeout}}s
+	  - name: Waiting for host to respond...
+	    local_action: >
+	      wait_for host={{ probe_host }}
+	      port={{ probe_port }}
+	      delay={{ probe_delay }}
+	      timeout={{ probe_timeout }}
+
+The probe.yml runs locally, and does 3 tasks - set some variables from env variables (which must be set as they have no default values), print a message, then wait until a tcp connection is made to the host/port specified
+
+We add the agent service to the docker compose file ~/cd-docker-ansible/todobackend/docker/dev/docker-compose.yml:
+	
+	agent:
+	  image: garethjones76/ansible
+	  volumes:
+    	    - ../../ansible/probe.yml:/ansible/site.yml
+	  links:
+	    - db
+	  environment:
+	    PROBE_HOST: "db"
+	    PROBE_PORT: "3306"
+	  command: ["probe.yml"]
+
+This uses the ansible image we just specified (ie this service uses image: not build: ) and maps the probe.yml file we created to /ansible/site.yml 
+
+==============================================================
+Section 11 - :  
 ==============================================================
 
 ==============================================================
