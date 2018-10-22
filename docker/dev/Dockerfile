@@ -1,5 +1,5 @@
 FROM garethjones76/todobackend-base:latest
-MAINTAINER Justin Menga <justin.menga@gmail.com>
+MAINTAINER Gareth Jones <gareth_jones76@hotmail.com>
 
 # Install dev/build dependencies
 RUN apt-get update && \
@@ -7,10 +7,11 @@ RUN apt-get update && \
 
 # Activate virtual environment and install wheel support
 RUN . /appenv/bin/activate && \
+    pip install --upgrade pip && \
     pip install wheel --upgrade
 
 # PIP environment variables (NOTE: must be set after installing wheel)
-ENV WHEELHOUSE=/wheelhouse PIP_WHEEL_DIR=/wheelhouse PIP_FIND_LINKS=/wheelhouse XDG_CACHE_HOME=/cache
+ENV WHEELHOUSE=/wheelhouse PIP_WHEEL_DIR=/wheelhouse PIP_FIND_LINKS=/wheelhouse XDG_CACHE_HOME=/cache PIP_NO_INPUT="1"
 
 # OUTPUT: Build artefacts (Wheels) are output here
 VOLUME /wheelhouse

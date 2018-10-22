@@ -11,6 +11,7 @@ test:
     MYSQL_USER: root
     MYSQL_PASSWORD: password
     TEST_OUTPUT_DIR: /reports
+    PIP_NO_INPUT: "1"
 
 builder:
   build:  ../../

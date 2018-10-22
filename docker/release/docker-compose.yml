@@ -56,7 +56,7 @@ db:
     MYSQL_ROOT_PASSWORD: password
 
 agent:
-  image: jmenga/ansible
+  image: garethjones76/ansible
   links:
     - db
   environment:
