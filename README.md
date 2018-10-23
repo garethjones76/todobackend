@@ -1277,16 +1277,219 @@ Release phase: Created a docker-compose.yml that defines our Release environment
 7) docker-compose run --rm app manage.py collectstatic --noinput 	<-- collect static content for nginx
 8) docker-compose run --rm app manage.py migrate --noinput		<-- create db schema and tables
 9) docker-compose up test		<-- starts nginx & app services, starts test service and runs UAT tests
+10) If tests pass - docker image and app wheels can be published to relevent repositories
 
+==============================================================
+Section 14 - : Automating continuous delivery using MAKE
+==============================================================
+To simplify the test and build stages previously defined we now introduce GNU Make. 
+GNU Make is a tool which controls the generation of executables and other non-source files of a program from the program's source files. Make uses a makefile which lists each of the non-source files and how to compute it from other files. Make is uesful here because it works well with shell commands. Also the structure of a makefile fits well with running ordered tasks making it readable and maintainable. Also as it is mature it is readily available on Linux and Mac OS
+
+We create a Makefile in the app-root alongside the docker and source folders
+	vi ~/cd-docker-ansible/todobackend/Makefile
+
+A simple Makefile would look like:
+	.PHONY test build release clean						<--  PHONY means these targets will run if called 											regardless of whether a file with the corresponding name 										 exists
+	
+	test:									<-- test target
+		docker-compose -f docker/dev/docker-compose.yml build
+		docker-compose -f docker/dev/docker-compose.yml up agent
+		docker-compose -f docker/dev/docker-compose.yml up test
+	build:									<-- build target
+		docker-compose -f docker/dev/docker-compose.yml up builder
+
+	release:						<-- release target
+		docker-compose -f docker/release/docker-compose.yml build
+		docker-compose -f docker/release/docker-compose.yml up agent
+		docker-compose -f docker/release/docker-compose.yml run --rm app manage.py collectstatic --noinput
+		docker-compose -f docker/release/docker-compose.yml run --rm app manage.py migrate --noinput		
+		docker-compose -f docker/release/docker-compose.yml up test
+
+	clean:
+		docker-compose -f docker/dev/docker-compose.yml kill		<-- kill running containers
+		docker-compose -f docker/dev/docker-compose.yml rm -f		<-- forcefully remove containers
+		docker-compose -f docker/release/docker-compose.yml kill
+		docker-compose -f docker/release/docker-compose.yml rm -f
+		
+So to build/test//release using this Makefile we would do the following:
+	make build						<-- build the application artefacts and copies to /target folder
+	make release						<-- creates release env, boostraps the env and runs the acceptance tests
+	make clean						<-- clean up the dev and release environments
+	
+We parametize the Makefile to remove hard-coded folder paths etc
+
+Next we create an account in Docker hub (https://hub.docker.com/) and link our git repositories to docker hub
+
+==============================================================
+Section 15 - Automated Docker hub repository builds: 
+==============================================================
+
+We can store our docker images to Docker hub using a push command:
+	docker login
+		Username: garethjones76
+		password: xxxxxxxxxxxx
+		Email:  gareth_jones76@hotmail.com
+	cd ../todobackend-client/
+	docker push garethjones76/todobackend-client
+
+We can also configure automated docker image builds in docker hub:
+First link docker hub to github:
+In docker hub - select:
+	Create
+	 ->    Creat Automated Build
+	 	--> Link account - select github (or bitbucket)
+			--> select "public and private" accesss level
+				--> on rediect, authorize dockerhub to access github account
+Now create the automated build:
+In docker hub - select:
+	Create
+	 ->    Creat Automated Build
+	 	--> select the project in github
+			--> select "public and private" accesss level
+				--> on redirect, authorize dockerhub to access github account
+					--> add a description
+					--> click create
+	Trigger a build
+	-> Select the repo in docker hub
+		--> Click "build settings"
+		  	--> Click Trigger
+	A build job will be added to the build queue
+	Check the status of the build
+		--> Click "build details"
+		A build job should show as queued and might take as long as 10 mins to complete
+		It should eventually show "success" with a tag of "latest"
+	To view the Dockerfile used:
+	--> click the Dockerfile tab
+Repeat these steps for todobackend-specs and todobackend-base and the docker-ansible repo (change repo name to ansible as "docker" is superfluous)
+
+				
+==============================================================
+Section 16 - Enhancing the workflow: 
+==============================================================
+Steps:
+Enhance clean task to clean up dangling images and volumes
+Add colour and messages to enhance feedback
+Make the workflow self-contained and independent of host
+Add robustness by:
+	producing reports
+	add error handling
+	ensure consistency - using up to date images, consistent state
+Add support for tagging and versioning and private docker registries
+
+
+Dangling images:
+running 'docker images' shows something like:
+
+	REPOSITORY                              TAG                      IMAGE ID            CREATED             SIZE
+	todobackenddev_cache                    latest                   923938f02a75        17 hours ago        489MB
+	<none>                                  <none>                   6f49070a06fc        17 hours ago        489MB
+	mmaia/im_ibm                            v1                       bc8dfedda02e        8 months ago        939MB
+	<none>                                  <none>                   cdb46b92073e        8 months ago        278MB
+	npmtest                                 latest                   83d33541ffdc        9 months ago        396MB
+	<none>                                  <none>                   8c5b31f889a2        9 months ago        484MB
+
+The images identified as <none> are "dangling - left when a new image is started with the same name and tags
+
+Docker allows you to identify dangling images:
+	docker images -f dangling=true
+	
+	REPOSITORY                        TAG                 IMAGE ID            CREATED             SIZE
+	<none>                            <none>              6f49070a06fc        17 hours ago        489MB
+	<none>                            <none>              cdb46b92073e        8 months ago        278MB
+	<none>                            <none>              8c5b31f889a2        9 months ago        484MB
+
+Docker allows you remove images using the rmi command so these two can be combined to remove dangling images. Alternatively it allows use of the "docker prune" command:
+	docker images --quiet --filter=dangling=true | xargs --no-run-if-empty docker rmi -f
+	or
+	docker container prune
+	docker image prune
+
+We can be more specific by adding a label to our Dockerfile:
+	vi ~/cd-docker-ansible/todobackend-base/Dockerfile
+	
+	...
+	ADD scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+	RUN chmod +x /usr/local/bin/entrypoint.sh
+	ENTRYPOINT ["entrypoint.sh"]
+	
+	LABEL application=todobackend
+
+now we rebuid our base image:
+	cd ~/cd-docker-ansible/todobackend-base
+	docker build -f ~/cd-docker-ansible/todobackend-base/Dockerfile -t garethjones76/todobackend-base .
+push the change to github - which will trigger an automated build in dockerhub
+	git commit -a -m "add lable to Dockerfile"
+	git push -u origin-master
+This change creates a label named "application" with a value "todobackend"
+
+Rebuilding our test workflow will now give us dangling images with the label now present:
+	~/cd-docker-ansible/todobackend
+	make test
+	docker images
+make clean can be used to target dangling images specific to the application:
+	cat Makefile 
+	
+	...
+	clean:
+	...
+	@ docker images -q -f dangling=true -f label=application=$(REPO_NAME) | xargs -I ARGS docker rmi -f ARGS
+	...
+
+	make clean
+	...
+	=> Removing dangling images...
+	Deleted: sha256:923938f02a754900d05eb9c92ce88580b45183cd3f197b5da9bc6abd6747d5f3
+	Deleted: sha256:2ba5ee59a94d23bdcf9628a3f0d312725316ae4ceb9307dc20bfffb4878d188d
+	Deleted: sha256:e663cbb55a067875a319409ee3d788c136f66d35ca03471d33526b5aa85648a5
+	...
+
+Docker volumes also become dangling - this is a volume which becomes orphaned when its container is destroyed
+We cam list dangling volumes with:
+	docker volume ls -f dangling=true
+	...
+	local               e5cf1bf9bc99425f45c7f5eecca86d5d8e3c930e3babda71dd60aeb2d1a69362
+	local               f26de7cbe816ec9a5fc0aac71ce5a221ced0805bc9f8bba6ec0064d04ab72fe9
+	local               f63664e4f82af3e8e40c2bc8c418519ccc6e4bdde69bb1d2fb451e5b7f5b35d1
+	local               f7a7622a15aa9eba448ae11302cd470446ec237770060fe53521dd0539d7a527
+	local               ff5dbe873f2e6058823a4fe0b114ab6ea189373bf3541b32f3e8496d6af69345
+	local               ff952f95dfb0b90b0b408a089994893240fd4f3448a091e284d81b0be8095efb
+We can remove these using:
+	docker volume rm $(docker volume ls -f dangling=true -q)
+
+We can also remove dangling volumes if we add the -v flag to the docker-compose rm command in our Makefile:
+	...
+	docker-compose -p $(REL_PROJECT) -f $(REL_COMPOSE_FILE) rm -f -v
+	...
+==============================================================
+Section 17 - Improve user feedback: 
+==============================================================
+
+==============================================================
+Section 18 - Make environment self-contained: 
+==============================================================
+Its easy to "forget" that the docker host is not the Mac but that we are running docker on a linux VM that the Mac talks to. The Mac is the docker client, the docker host is a Linux VM and the docker containers run on the docker host.
+This is seamless on the Mac so volume mappings on the Docker host "magically" appear on the Mac file system and vice-versa.
+However if the docker host were to be remote (eg AWS) then this use of volume mappings would break.
+There are a few rules for using volume mappings and self-containment:
+	Volume mappings are fine if sharing data between docker containers running on the same host eg the pip cache
+	If copying from client to host (eg copying scripts or config to the containers) - in Dockerfile use the "COPY" directive eg:
+		cat docker/dev/Dockerfile |grep COPY
+			COPY scripts/test.sh /usr/local/bin/test.sh
+			COPY src /application
+		cat docker/release/Dockerfile.nginx 
+			COPY todobackend.conf /etc/nginx/conf.d/todobackend.conf
+	If copying from host to client (eg reports or app archives) - use the "docker cp" directive eg:
+		cat Makefile |grep "docker cp"
+			@ docker cp $$(docker-compose -p $(DEV_PROJECT) -f $(DEV_COMPOSE_FILE) ps -q test):/reports/. reports
+			@ docker cp $$(docker-compose -p $(DEV_PROJECT) -f $(DEV_COMPOSE_FILE) ps -q builder):/wheelhouse/. target
+			@ docker cp $$(docker-compose -p $(REL_PROJECT) -f $(REL_COMPOSE_FILE) ps -q test):/reports/. reports	
 
 
 
 ==============================================================
-Section 14 - : 
+Section 19 - Continuous delivery using Jenkins: 
 ==============================================================
 
-
-  
 
   
 
